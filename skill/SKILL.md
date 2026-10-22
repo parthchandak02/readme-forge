@@ -24,6 +24,13 @@ first, every time; it is the spec. `layouts/` has four skeletons (app, cli, visu
    - CLI: `rf.py term "<the best command>" -o docs/assets/readme/cli.png --cwd <repo>`; if it needs
      credentials or network you don't have, write a realistic sample output to a scratch file
      from the code's actual output format and use `rf.py term --text file --title "<cmd>"`.
+   - Live data: capture when there is something to show (an open park, a market day); if the
+     default view is empty, pick a different region/item via URL params, `--js` or `--click`
+     (both run after `--wait`; `--settle` waits after them). `--clip x,y,w,h` crops.
+   - Demo data is fine and often necessary: a scratch copy of the app, a tiny fake API server, or a
+     made-up input file, all with obviously fictional content. Say "demo data" in the caption.
+   - Hardware projects: show what the device displays (a rendered preview), the web UI, or a
+     wiring/architecture table. Never photos with people in them.
    - Always look at the image you captured. Retake if it's blank, mid-load, shows an error,
      a cookie banner, or anyone's personal data. No image beats a bad image.
 4. **Write the README** from the layout, following STYLE.md. Never invent features, numbers or
@@ -36,7 +43,20 @@ first, every time; it is the spec. `layouts/` has four skeletons (app, cli, visu
    positives (placeholders, the word `.env`, image bytes), commit that one time with `--no-verify`.
    If anything looks like a real secret, stop and report it. Then `git push`.
 
+## Practicalities
+
+- Run `rf.py` with the system python that has Playwright, never inside a project venv.
+- Rich/box-drawing tables: `rf.py term ... --line-height 1.2`. Drop warnings with `--no-stderr`.
+- Viewing the rendered page on GitHub is optional; `rf.py check` is the gate. Private repos can't be
+  viewed by `shoot` anyway.
+- The owner's git-secrets hook flags `.env`, `.venv`, `environ`, `<your-key>` placeholders and long
+  upper-case strings. Read the flagged lines; if every one is that kind of false positive, commit
+  with `--no-verify`.
+
 ## Don'ts
+
+- Don't stop or kill any process you didn't start. Track the PID of every server you launch and
+  kill only that PID; never `pkill` by name or port. The owner runs live services locally.
 
 - Don't touch any file other than `README.md` and `docs/assets/readme/*`.
 - Don't put personal data (emails, phone numbers, home addresses, family names, account numbers,

@@ -20,7 +20,9 @@ run it / use it   the shortest path from clone to working, in one code block
 footer            centred <sub> "Built with ..." line
 ```
 
-Not every repo needs every section. A 200-line generative-art piece needs the hero, one
+Not every repo needs every section. Hardware projects use the `app` layout with a "Hardware"
+table (part, role, link) in place of the comparison, and a rendered preview of what the device
+shows as the hero. A 200-line generative-art piece needs the hero, one
 paragraph on the data, "how it works", the live link and the run commands. A library needs
 install, a 10-line usage example and the API. Drop sections; never pad them.
 
@@ -61,6 +63,8 @@ install, a 10-line usage example and the API. Drop sections; never pad them.
 - Every `<img>` has `alt` text that describes the content, not "screenshot".
 - Never commit images containing real personal data: names, emails, addresses, account numbers,
   private messages. Use demo data, or crop.
+- Demo data is fine and usually necessary: fake API, made-up files, public-domain sample photos.
+  Say so in the caption.
 - No image is better than a bad image. If the thing has no honest visual, use a text-only hero.
 
 ## Private repos
@@ -84,5 +88,5 @@ The GitHub "About" box is part of the front page:
 ## Before you push
 
 `python3 rf.py check README.md` must pass: hero present, anchors resolve, images exist and are
-small enough, alt text present, no personal email, local paths or keys. Then view the rendered
-page on GitHub once.
+small enough, alt text present, no personal email, local paths or keys. Viewing the rendered
+page on GitHub afterwards is worth it for public repos.

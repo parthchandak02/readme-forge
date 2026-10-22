@@ -9,6 +9,7 @@
   python3 rf.py audit ~/projects
 
 shoot/term need Playwright (pip install playwright). Everything else is stdlib.
+Run rf.py with the python that has Playwright, not a project's venv.
 """
 import argparse
 import contextlib
@@ -33,8 +34,11 @@ MAX_IMAGE_KB = 600
 @contextlib.contextmanager
 def serve(directory: Path):
     """Serve a static folder on a free localhost port."""
-    handler = functools.partial(http.server.SimpleHTTPRequestHandler, directory=str(directory))
-    handler.log_message = lambda *a, **k: None
+    class Quiet(http.server.SimpleHTTPRequestHandler):
+        def log_message(self, *a):
+            pass
+
+    handler = functools.partial(Quiet, directory=str(directory))
     with socketserver.TCPServer(("127.0.0.1", 0), handler) as httpd:
         t = threading.Thread(target=httpd.serve_forever, daemon=True)
         t.start()
@@ -57,7 +61,7 @@ def parse_size(s: str) -> tuple[int, int]:
     return int(w), int(h)
 
 
-def capture(page, out: Path, full: bool, selector: str | None):
+def capture(page, out: Path, full: bool, selector: str | None, clip: dict | None = None):
     out.parent.mkdir(parents=True, exist_ok=True)
     kind = "jpeg" if out.suffix.lower() in (".jpg", ".jpeg") else "png"
     opts = {"path": str(out), "type": kind}
@@ -66,9 +70,15 @@ def capture(page, out: Path, full: bool, selector: str | None):
     if selector:
         page.locator(selector).first.screenshot(**opts)
     else:
-        page.screenshot(full_page=full, **opts)
+        page.screenshot(full_page=full and not clip, clip=clip, **opts)
+    while kind == "jpeg" and out.stat().st_size > MAX_IMAGE_KB * 1024 and opts["quality"] > 55:
+        opts["quality"] -= 10
+        if selector:
+            page.locator(selector).first.screenshot(**opts)
+        else:
+            page.screenshot(full_page=full and not clip, clip=clip, **opts)
     kb = out.stat().st_size // 1024
-    note = f"  (over {MAX_IMAGE_KB}KB: try .jpg or a smaller --size)" if kb > MAX_IMAGE_KB else ""
+    note = f"  (over {MAX_IMAGE_KB}KB: use .jpg, --scale 1.5 or a smaller --size)" if kb > MAX_IMAGE_KB else ""
     print(f"{out}  {kb}KB{note}")
 
 
@@ -92,14 +102,20 @@ def cmd_shoot(a):
         page.goto(target, wait_until="networkidle" if a.idle else "load", timeout=60000)
         for css in a.hide or []:
             page.add_style_tag(content=f"{css} {{ visibility: hidden !important; }}")
-        for xy in a.click or []:
-            x, y = (int(v) for v in xy.split(","))
-            page.mouse.click(x, y)
-            page.wait_for_timeout(400)
-        if a.js:
-            page.evaluate(a.js)
         page.wait_for_timeout(a.wait)
-        capture(page, Path(a.out), a.full, a.selector)
+        if a.click or a.js:
+            for xy in a.click or []:
+                x, y = (int(v) for v in xy.split(","))
+                page.mouse.click(x, y)
+                page.wait_for_timeout(300)
+            if a.js:
+                page.evaluate(a.js)
+            page.wait_for_timeout(a.settle)
+        clip = None
+        if a.clip:
+            x, y, cw, ch = (float(v) for v in a.clip.split(","))
+            clip = {"x": x, "y": y, "width": cw, "height": ch}
+        capture(page, Path(a.out), a.full, a.selector, clip)
         b.close()
 
 
@@ -139,7 +155,7 @@ def ansi_to_html(text: str) -> str:
 
 
 TERM_PAGE = """<!doctype html><meta charset="utf-8"><style>
-body{margin:0;padding:28px;background:transparent;font:14px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}
+body{margin:0;padding:28px;background:transparent;font:14px/%(lh)s ui-monospace,SFMono-Regular,Menlo,monospace}
 .win{display:inline-block;min-width:640px;max-width:%(maxw)spx;background:#0d1117;color:#e6edf3;border-radius:10px;
  box-shadow:0 12px 40px rgba(0,0,0,.35);overflow:hidden;border:1px solid #30363d}
 .bar{display:flex;align-items:center;gap:8px;padding:10px 14px;background:#161b22;border-bottom:1px solid #30363d}
@@ -157,13 +173,13 @@ def cmd_term(a):
     else:
         env = dict(os.environ, FORCE_COLOR="1", CLICOLOR_FORCE="1", COLUMNS=str(a.cols), TERM="xterm-256color")
         r = subprocess.run(a.command, shell=True, cwd=a.cwd, capture_output=True, text=True, env=env, timeout=120)
-        body = (r.stdout + r.stderr).rstrip()
+        body = (r.stdout if a.no_stderr else r.stdout + r.stderr).rstrip()
         shown = a.title or a.command
     lines = body.splitlines()
     if len(lines) > a.max_lines:
         body = "\n".join(lines[: a.max_lines] + ["\x1b[2m…\x1b[0m"])
     prompt = "" if a.text else f'<span class="p">$</span> {html.escape(a.command)}\n'
-    page_html = TERM_PAGE % {"maxw": a.cols * 9, "title": html.escape(shown), "body": prompt + ansi_to_html(body)}
+    page_html = TERM_PAGE % {"lh": a.line_height, "maxw": a.cols * 9, "title": html.escape(shown), "body": prompt + ansi_to_html(body)}
     with browser() as pw:
         b = pw.chromium.launch()
         page = b.new_page(device_scale_factor=2, viewport={"width": a.cols * 9 + 120, "height": 400})
@@ -223,14 +239,16 @@ def check(readme: Path) -> list[str]:
         if target and not (root / target).exists():
             issues.append(f"link: {target} does not exist")
 
+    prose = re.sub(r'https?://[^\s)"\']+', "", text)  # badge URLs carry colour codes that look like numbers
     for pat, label in PERSONAL:
-        for m in re.finditer(pat, text):
+        for m in re.finditer(pat, prose if label == "phone-like number" else text):
             if label == "phone-like number" and (re.fullmatch(r"[\d.]+", m.group(0)) or "-" not in m.group(0) and " " not in m.group(0)):
                 continue
             issues.append(f"privacy: {label}: {m.group(0)[:40]}")
 
-    if len(lines) > 260:
-        issues.append(f"length: {len(lines)} lines; move detail into <details> or docs/")
+    visible = len(re.sub(r"<details>.*?</details>", "", text, flags=re.S).splitlines())
+    if visible > 220:
+        issues.append(f"length: {visible} lines outside <details>; fold reference material away")
     if not re.search(r"^## ", text, re.M):
         issues.append("structure: no ## sections")
     return issues
@@ -299,14 +317,16 @@ def main():
     s.add_argument("--size", default="1280x800", help="viewport WxH (default 1280x800)")
     s.add_argument("--scale", type=float, default=2, help="device pixel ratio (default 2)")
     s.add_argument("--wait", type=int, default=2500, help="ms to wait after load, for animation/data (default 2500)")
+    s.add_argument("--settle", type=int, default=1200, help="ms to wait after --click/--js, before capture (default 1200)")
+    s.add_argument("--clip", help="x,y,w,h crop in CSS pixels")
     s.add_argument("--idle", action="store_true", help="wait for network idle before the timer")
     s.add_argument("--full", action="store_true", help="full-page capture")
     s.add_argument("--selector", help="capture just this element")
     s.add_argument("--mobile", action="store_true", help="mobile emulation (use with --size 390x844)")
     s.add_argument("--dark", action="store_true", help="prefers-color-scheme: dark")
     s.add_argument("--hide", action="append", help="CSS selector to hide (cookie banners), repeatable")
-    s.add_argument("--click", action="append", help="x,y to click before capture, repeatable")
-    s.add_argument("--js", help="JavaScript to run before capture")
+    s.add_argument("--click", action="append", help="x,y to click after --wait, repeatable")
+    s.add_argument("--js", help="JavaScript to run after --wait and clicks")
     s.set_defaults(fn=cmd_shoot)
 
     t = sub.add_parser("term", help="render a command's output as a terminal-window image")
@@ -317,6 +337,8 @@ def main():
     t.add_argument("--title")
     t.add_argument("--cols", type=int, default=92)
     t.add_argument("--max-lines", type=int, default=28)
+    t.add_argument("--line-height", default="1.3", help="1.2 keeps box-drawing tables joined (default 1.3)")
+    t.add_argument("--no-stderr", action="store_true", help="drop stderr (warnings, progress bars)")
     t.set_defaults(fn=cmd_term)
 
     c = sub.add_parser("check", help="lint README files")

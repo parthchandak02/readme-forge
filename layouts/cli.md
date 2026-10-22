@@ -46,6 +46,12 @@
 
 ## How it works
 
+<!-- Optional second image: the next most useful view (offline mode, a report, a review page). -->
+<div align="center">
+<img src="docs/assets/readme/{second}.png" width="720" alt="{...}">
+<br><sub>{Caption; say "demo data" when it is.}</sub>
+</div>
+
 {Short numbered list or 3-column table.}
 
 <details>
