@@ -57,7 +57,6 @@ first, every time; it is the spec. `layouts/` has four skeletons (app, cli, visu
 
 - Don't stop or kill any process you didn't start. Track the PID of every server you launch and
   kill only that PID; never `pkill` by name or port. The owner runs live services locally.
-
 - Don't touch any file other than `README.md` and `docs/assets/readme/*`.
 - Don't put personal data (emails, phone numbers, home addresses, family names, account numbers,
   private messages, local `/Users/...` paths) in the README or in screenshots, even for private repos.
