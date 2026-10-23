@@ -98,15 +98,40 @@ def cmd_shoot(a):
             color_scheme="dark" if a.dark else "light",
             is_mobile=a.mobile, has_touch=a.mobile,
         )
+        if a.seed is not None:
+            ctx.add_init_script(SEED_JS % a.seed)
+        for spec in a.mock or []:
+            pattern, _, path = spec.partition("=")
+            body = Path(path).read_bytes()
+            ctype = "application/json" if path.endswith(".json") else "text/plain"
+            ctx.route(pattern, fulfiller(body, ctype))
         page = ctx.new_page()
         page.goto(target, wait_until="networkidle" if a.idle else "load", timeout=60000)
         for css in a.hide or []:
             page.add_style_tag(content=f"{css} {{ visibility: hidden !important; }}")
         page.wait_for_timeout(a.wait)
-        if a.click or a.js:
+        if a.click or a.js or a.drag or a.wheel or a.type:
             for xy in a.click or []:
                 x, y = (int(v) for v in xy.split(","))
                 page.mouse.click(x, y)
+                page.wait_for_timeout(300)
+            for spec in a.type or []:
+                sel, _, text = spec.partition("=")
+                page.locator(sel).first.click()
+                page.keyboard.type(text, delay=40)
+                page.wait_for_timeout(300)
+            for spec in a.drag or []:
+                x1, y1, x2, y2 = (float(v) for v in spec.split(","))
+                page.mouse.move(x1, y1)
+                page.mouse.down()
+                for i in range(1, 21):
+                    page.mouse.move(x1 + (x2 - x1) * i / 20, y1 + (y2 - y1) * i / 20)
+                    page.wait_for_timeout(15)
+                page.mouse.up()
+                page.wait_for_timeout(300)
+            if a.wheel:
+                page.mouse.move(w / 2, h / 2)
+                page.mouse.wheel(0, a.wheel)
                 page.wait_for_timeout(300)
             if a.js:
                 page.evaluate(a.js)
@@ -115,8 +140,23 @@ def cmd_shoot(a):
         if a.clip:
             x, y, cw, ch = (float(v) for v in a.clip.split(","))
             clip = {"x": x, "y": y, "width": cw, "height": ch}
+        if clip and a.full:
+            page.set_viewport_size({"width": w, "height": max(h, int(clip["y"] + clip["height"]) + 1)})
+            page.wait_for_timeout(300)
         capture(page, Path(a.out), a.full, a.selector, clip)
         b.close()
+
+
+def fulfiller(body: bytes, ctype: str):
+    def handle(route, _request=None):
+        route.fulfill(status=200, body=body, content_type=ctype, headers={"Access-Control-Allow-Origin": "*"})
+    return handle
+
+
+SEED_JS = """(() => { let s = %d >>> 0;
+  Math.random = () => { s = (s + 0x6D2B79F5) >>> 0; let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296; }; })();"""
 
 
 # ---------------------------------------------------------------- term
@@ -178,6 +218,7 @@ def cmd_term(a):
     lines = body.splitlines()
     if len(lines) > a.max_lines:
         body = "\n".join(lines[: a.max_lines] + ["\x1b[2m…\x1b[0m"])
+        print(f"note: output cut to {a.max_lines} of {len(lines)} lines (--max-lines)", file=sys.stderr)
     prompt = "" if a.text else f'<span class="p">$</span> {html.escape(a.command)}\n'
     page_html = TERM_PAGE % {"lh": a.line_height, "maxw": a.cols * 9, "title": html.escape(shown), "body": prompt + ansi_to_html(body)}
     with browser() as pw:
@@ -318,7 +359,7 @@ def main():
     s.add_argument("--scale", type=float, default=2, help="device pixel ratio (default 2)")
     s.add_argument("--wait", type=int, default=2500, help="ms to wait after load, for animation/data (default 2500)")
     s.add_argument("--settle", type=int, default=1200, help="ms to wait after --click/--js, before capture (default 1200)")
-    s.add_argument("--clip", help="x,y,w,h crop in CSS pixels")
+    s.add_argument("--clip", help="x,y,w,h crop in CSS pixels (with --full it can reach below the fold)")
     s.add_argument("--idle", action="store_true", help="wait for network idle before the timer")
     s.add_argument("--full", action="store_true", help="full-page capture")
     s.add_argument("--selector", help="capture just this element")
@@ -326,7 +367,12 @@ def main():
     s.add_argument("--dark", action="store_true", help="prefers-color-scheme: dark")
     s.add_argument("--hide", action="append", help="CSS selector to hide (cookie banners), repeatable")
     s.add_argument("--click", action="append", help="x,y to click after --wait, repeatable")
-    s.add_argument("--js", help="JavaScript to run after --wait and clicks")
+    s.add_argument("--js", help="JavaScript to run after --wait and the interactions below")
+    s.add_argument("--type", action="append", help='"selector=text": click the field and type, repeatable')
+    s.add_argument("--drag", action="append", help="x1,y1,x2,y2 mouse drag (drawing tools, 3D orbit), repeatable")
+    s.add_argument("--wheel", type=int, help="scroll-wheel delta at the centre; positive zooms most 3D scenes out")
+    s.add_argument("--mock", action="append", help='"url-glob=file.json": answer matching requests with a local file (demo data)')
+    s.add_argument("--seed", type=int, help="make Math.random deterministic so captures repeat")
     s.set_defaults(fn=cmd_shoot)
 
     t = sub.add_parser("term", help="render a command's output as a terminal-window image")

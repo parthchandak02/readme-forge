@@ -25,8 +25,10 @@ first, every time; it is the spec. `layouts/` has four skeletons (app, cli, visu
      credentials or network you don't have, write a realistic sample output to a scratch file
      from the code's actual output format and use `rf.py term --text file --title "<cmd>"`.
    - Live data: capture when there is something to show (an open park, a market day); if the
-     default view is empty, pick a different region/item via URL params, `--js` or `--click`
-     (both run after `--wait`; `--settle` waits after them). `--clip x,y,w,h` crops.
+     default view is empty, pick a different region/item via URL params, `--js` or `--click`,
+     `--type "sel=text"`, `--drag x1,y1,x2,y2` or `--wheel N` (all run after `--wait`; `--settle` waits
+     after them). `--clip x,y,w,h` crops. `--mock "glob=file.json"` answers an API with demo data;
+     `--seed N` freezes Math.random so a generative piece captures the same frame every run.
    - Demo data is fine and often necessary: a scratch copy of the app, a tiny fake API server, or a
      made-up input file, all with obviously fictional content. Say "demo data" in the caption.
    - Hardware projects: show what the device displays (a rendered preview), the web UI, or a

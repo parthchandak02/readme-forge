@@ -54,6 +54,9 @@ pip install playwright && playwright install chromium     # only for shoot/term
 python3 rf.py shoot https://example.com -o docs/assets/readme/hero.jpg --wait 4000
 python3 rf.py shoot ./dist -o docs/assets/readme/hero.jpg       # serves the folder itself
 python3 rf.py shoot http://localhost:5173 -o hero.png --size 390x844 --mobile
+python3 rf.py shoot ./dist -o hero.jpg --seed 1 --mock "**/api/data*=demo.json"   # repeatable frame, demo data
+python3 rf.py shoot URL -o hero.jpg --wheel 400 --drag 600,400,760,380             # zoom out, orbit a 3D scene
+python3 rf.py shoot URL -o hero.jpg --type "#search=Lisbon" --click 640,300        # type, then click
 python3 rf.py term "mytool --help" -o docs/assets/readme/cli.png
 python3 rf.py check README.md                                   # lint before pushing
 python3 rf.py sidebar owner/repo --description "..." --homepage https://... --topics a,b,c
