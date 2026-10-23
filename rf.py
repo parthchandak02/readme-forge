@@ -242,7 +242,7 @@ def check(readme: Path) -> list[str]:
     prose = re.sub(r'https?://[^\s)"\']+', "", text)  # badge URLs carry colour codes that look like numbers
     for pat, label in PERSONAL:
         for m in re.finditer(pat, prose if label == "phone-like number" else text):
-            if label == "phone-like number" and (re.fullmatch(r"[\d.]+", m.group(0)) or "-" not in m.group(0) and " " not in m.group(0)):
+            if label == "phone-like number" and (re.fullmatch(r"[\d.]+|\d{4}-\d\d-\d\d( \d+)?", m.group(0)) or "-" not in m.group(0) and " " not in m.group(0)):
                 continue
             issues.append(f"privacy: {label}: {m.group(0)[:40]}")
 
