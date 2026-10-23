@@ -48,6 +48,8 @@ first, every time; it is the spec. `layouts/` has four skeletons (app, cli, visu
 ## Practicalities
 
 - Run `rf.py` with the system python that has Playwright, never inside a project venv.
+- Some repos' `.gitignore` ignores everything by default; check `git status` after `git add` and
+  use `git add -f README.md docs/assets/readme` if your files weren't staged.
 - Rich/box-drawing tables: `rf.py term ... --line-height 1.2`. Drop warnings with `--no-stderr`.
 - Viewing the rendered page on GitHub is optional; `rf.py check` is the gate. Private repos can't be
   viewed by `shoot` anyway.
