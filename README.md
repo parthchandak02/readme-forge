@@ -57,6 +57,7 @@ python3 rf.py shoot http://localhost:5173 -o hero.png --size 390x844 --mobile
 python3 rf.py shoot ./dist -o hero.jpg --seed 1 --mock "**/api/data*=demo.json"   # repeatable frame, demo data
 python3 rf.py shoot URL -o hero.jpg --wheel 400 --drag 600,400,760,380             # zoom out, orbit a 3D scene
 python3 rf.py shoot URL -o hero.jpg --type "#search=Lisbon" --click 640,300        # type, then click
+python3 rf.py shoot URL -o hero.jpg --init-js "localStorage.demo='1'" --stable 6000 --dark   # seeded state, settled frame
 python3 rf.py term "mytool --help" -o docs/assets/readme/cli.png
 python3 rf.py check README.md                                   # lint before pushing
 python3 rf.py sidebar owner/repo --description "..." --homepage https://... --topics a,b,c
@@ -68,7 +69,10 @@ python3 rf.py audit ~/projects                                  # README status 
 `/Users/...` paths and API keys.
 
 `term` runs a command with colour forced on and renders the output as a terminal window. Pass
-`--text file` to render saved output instead, for commands that need credentials.
+`--text file` to render saved output instead, for commands that need credentials. Long output is cut
+at `--max-lines` (default 28), with a note.
+
+Tests: `python3 -m unittest discover tests`.
 
 ## With an agent
 

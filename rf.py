@@ -2,7 +2,7 @@
 """readme-forge: the tools behind a good repo front page.
 
   python3 rf.py shoot https://example.com -o docs/assets/readme/hero.png
-  python3 rf.py shoot ./dist -o hero.png --size 1280x800 --wait 4000
+  python3 rf.py shoot ./dist -o hero.png --size 1280x800 --wait 4000 --stable 5000
   python3 rf.py term "mycli --help" -o docs/assets/readme/cli.png --cwd ../mycli
   python3 rf.py check README.md
   python3 rf.py sidebar owner/repo --description "..." --homepage https://... --topics a,b,c
@@ -17,6 +17,7 @@ import functools
 import html
 import http.server
 import json
+import mimetypes
 import os
 import re
 import socketserver
@@ -90,6 +91,11 @@ def cmd_shoot(a):
             p = Path(target).resolve()
             root, page_name = (p, "") if p.is_dir() else (p.parent, p.name)
             target = stack.enter_context(serve(root)) + page_name
+        early = a.load in ("domcontentloaded", "commit") and not a.idle
+        if early:
+            # Playwright's screenshot waits for document.fonts.ready, which never settles while the page
+            # is still loading; skip that wait and do a bounded one ourselves before capture.
+            os.environ["PW_TEST_SCREENSHOT_NO_FONTS_READY"] = "1"
         pw = stack.enter_context(browser())
         b = pw.chromium.launch()
         ctx = b.new_context(
@@ -100,13 +106,19 @@ def cmd_shoot(a):
         )
         if a.seed is not None:
             ctx.add_init_script(SEED_JS % a.seed)
+        for js in a.init_js or []:
+            ctx.add_init_script(Path(js).read_text() if js.endswith(".js") and Path(js).is_file() else js)
         for spec in a.mock or []:
-            pattern, _, path = spec.partition("=")
+            pattern, _, path = spec.rpartition("=")  # globs may contain "=", file names rarely do
+            if not pattern or not Path(path).is_file():
+                raise SystemExit(f"--mock {spec!r}: expected url-glob=existing-file")
             body = Path(path).read_bytes()
-            ctype = "application/json" if path.endswith(".json") else "text/plain"
+            ctype = mimetypes.guess_type(path)[0] or "text/plain"
             ctx.route(pattern, fulfiller(body, ctype))
         page = ctx.new_page()
-        page.goto(target, wait_until="networkidle" if a.idle else "load", timeout=60000)
+        page.goto(target, wait_until="networkidle" if a.idle else a.load, timeout=60000)
+        if a.dark:
+            page.evaluate(DARK_JS)
         for css in a.hide or []:
             page.add_style_tag(content=f"{css} {{ visibility: hidden !important; }}")
         page.wait_for_timeout(a.wait)
@@ -134,8 +146,17 @@ def cmd_shoot(a):
                 page.mouse.wheel(0, a.wheel)
                 page.wait_for_timeout(300)
             if a.js:
-                page.evaluate(a.js)
+                js = a.js
+                if re.search(r"\bawait\b", js) and not re.match(r"\s*(async\b|\()", js):
+                    js = f"(async () => {{ {js} }})()"
+                page.evaluate(js)  # a returned promise is awaited
             page.wait_for_timeout(a.settle)
+        if a.dark:
+            page.evaluate(DARK_JS)  # again, in case the app re-applied its saved theme
+        if early:
+            page.evaluate("Promise.race([document.fonts.ready, new Promise(r => setTimeout(r, 3000))]).then(() => 0)")
+        if a.stable:
+            wait_stable(page, a.stable)
         clip = None
         if a.clip:
             x, y, cw, ch = (float(v) for v in a.clip.split(","))
@@ -145,6 +166,26 @@ def cmd_shoot(a):
             page.wait_for_timeout(300)
         capture(page, Path(a.out), a.full, a.selector, clip)
         b.close()
+
+
+def wait_stable(page, timeout_ms: int, every_ms: int = 250):
+    """Poll the viewport until two frames in a row are identical, or give up at timeout_ms."""
+    last, waited = page.screenshot(), 0
+    while waited < timeout_ms:
+        page.wait_for_timeout(every_ms)
+        waited += every_ms
+        now = page.screenshot()
+        if now == last:
+            print(f"note: page stable after {waited}ms", file=sys.stderr)
+            return
+        last = now
+    print(f"note: page still changing after {timeout_ms}ms (--stable); capturing anyway", file=sys.stderr)
+
+
+DARK_JS = """(() => { const r = document.documentElement;
+  r.classList.remove('light'); r.classList.add('dark'); r.style.colorScheme = 'dark';
+  r.setAttribute('data-theme', 'dark'); r.setAttribute('data-bs-theme', 'dark');
+  if (document.body) { document.body.classList.remove('light'); document.body.classList.add('dark'); } })()"""
 
 
 def fulfiller(body: bytes, ctype: str):
@@ -195,7 +236,7 @@ def ansi_to_html(text: str) -> str:
 
 
 TERM_PAGE = """<!doctype html><meta charset="utf-8"><style>
-body{margin:0;padding:28px;background:transparent;font:14px/%(lh)s ui-monospace,SFMono-Regular,Menlo,monospace}
+body{margin:0;padding:28px;background:transparent;font:14px/%(lh)s %(font)s}
 .win{display:inline-block;min-width:640px;max-width:%(maxw)spx;background:#0d1117;color:#e6edf3;border-radius:10px;
  box-shadow:0 12px 40px rgba(0,0,0,.35);overflow:hidden;border:1px solid #30363d}
 .bar{display:flex;align-items:center;gap:8px;padding:10px 14px;background:#161b22;border-bottom:1px solid #30363d}
@@ -217,16 +258,30 @@ def cmd_term(a):
         shown = a.title or a.command
     lines = body.splitlines()
     if len(lines) > a.max_lines:
-        body = "\n".join(lines[: a.max_lines] + ["\x1b[2m…\x1b[0m"])
+        body = "\n".join(lines[: a.max_lines] + [f"\x1b[2m… {len(lines) - a.max_lines} more lines\x1b[0m"])
         print(f"note: output cut to {a.max_lines} of {len(lines)} lines (--max-lines)", file=sys.stderr)
     prompt = "" if a.text else f'<span class="p">$</span> {html.escape(a.command)}\n'
-    page_html = TERM_PAGE % {"lh": a.line_height, "maxw": a.cols * 9, "title": html.escape(shown), "body": prompt + ansi_to_html(body)}
+    page_html = TERM_PAGE % {"lh": a.line_height, "font": a.font, "maxw": a.cols * 9, "title": html.escape(shown), "body": prompt + ansi_to_html(body)}
     with browser() as pw:
         b = pw.chromium.launch()
         page = b.new_page(device_scale_factor=2, viewport={"width": a.cols * 9 + 120, "height": 400})
         page.set_content(page_html)
+        page.evaluate("document.fonts.ready.then(() => 0)")
+        fonts = sorted({f["familyName"] for f in platform_fonts(page, "pre")})
+        if len(fonts) > 1:
+            print(f"note: text drawn with {', '.join(fonts)}; some glyphs fell back from the first --font", file=sys.stderr)
         capture(page, Path(a.out), False, ".win")
         b.close()
+
+
+def platform_fonts(page, selector: str) -> list[dict]:
+    """The fonts Chromium actually used for an element's text."""
+    cdp = page.context.new_cdp_session(page)
+    cdp.send("DOM.enable")
+    cdp.send("CSS.enable")
+    root = cdp.send("DOM.getDocument")["root"]["nodeId"]
+    node = cdp.send("DOM.querySelector", {"nodeId": root, "selector": selector})["nodeId"]
+    return cdp.send("CSS.getPlatformFontsForNode", {"nodeId": node})["fonts"]
 
 
 # ---------------------------------------------------------------- check
@@ -281,9 +336,10 @@ def check(readme: Path) -> list[str]:
             issues.append(f"link: {target} does not exist")
 
     prose = re.sub(r'https?://[^\s)"\']+', "", text)  # badge URLs carry colour codes that look like numbers
+    prose = re.sub(r"\b\d{4}-\d\d-\d\d\b", "DATE", prose)  # ISO dates, alone or in ranges
     for pat, label in PERSONAL:
         for m in re.finditer(pat, prose if label == "phone-like number" else text):
-            if label == "phone-like number" and (re.fullmatch(r"[\d.]+|\d{4}-\d\d-\d\d( \d+)?", m.group(0)) or "-" not in m.group(0) and " " not in m.group(0)):
+            if label == "phone-like number" and (re.fullmatch(r"[\d.]+", m.group(0)) or "-" not in m.group(0) and " " not in m.group(0)):
                 continue
             issues.append(f"privacy: {label}: {m.group(0)[:40]}")
 
@@ -360,19 +416,23 @@ def main():
     s.add_argument("--wait", type=int, default=2500, help="ms to wait after load, for animation/data (default 2500)")
     s.add_argument("--settle", type=int, default=1200, help="ms to wait after --click/--js, before capture (default 1200)")
     s.add_argument("--clip", help="x,y,w,h crop in CSS pixels (with --full it can reach below the fold)")
-    s.add_argument("--idle", action="store_true", help="wait for network idle before the timer")
+    s.add_argument("--load", default="load", choices=["load", "domcontentloaded", "networkidle", "commit"],
+                   help="navigation event to wait for (default load; domcontentloaded for pages that never finish loading)")
+    s.add_argument("--idle", action="store_true", help="same as --load networkidle")
+    s.add_argument("--stable", type=int, metavar="MS", help="before capture, wait up to MS until two frames 250ms apart match")
     s.add_argument("--full", action="store_true", help="full-page capture")
     s.add_argument("--selector", help="capture just this element")
     s.add_argument("--mobile", action="store_true", help="mobile emulation (use with --size 390x844)")
-    s.add_argument("--dark", action="store_true", help="prefers-color-scheme: dark")
+    s.add_argument("--dark", action="store_true", help="prefers-color-scheme: dark, plus html.dark and data-theme=dark for class-based themes")
     s.add_argument("--hide", action="append", help="CSS selector to hide (cookie banners), repeatable")
     s.add_argument("--click", action="append", help="x,y to click after --wait, repeatable")
-    s.add_argument("--js", help="JavaScript to run after --wait and the interactions below")
+    s.add_argument("--js", help="JavaScript to run after --wait and the interactions below; a returned promise (or top-level await) is awaited")
     s.add_argument("--type", action="append", help='"selector=text": click the field and type, repeatable')
     s.add_argument("--drag", action="append", help="x1,y1,x2,y2 mouse drag (drawing tools, 3D orbit), repeatable")
     s.add_argument("--wheel", type=int, help="scroll-wheel delta at the centre; positive zooms most 3D scenes out")
     s.add_argument("--mock", action="append", help='"url-glob=file.json": answer matching requests with a local file (demo data)')
     s.add_argument("--seed", type=int, help="make Math.random deterministic so captures repeat")
+    s.add_argument("--init-js", action="append", help="JS (or a .js file) run before the page's own scripts, e.g. to seed localStorage; repeatable")
     s.set_defaults(fn=cmd_shoot)
 
     t = sub.add_parser("term", help="render a command's output as a terminal-window image")
@@ -382,7 +442,8 @@ def main():
     t.add_argument("--text", help="render this file's text instead of running a command")
     t.add_argument("--title")
     t.add_argument("--cols", type=int, default=92)
-    t.add_argument("--max-lines", type=int, default=28)
+    t.add_argument("--max-lines", type=int, default=28, help="cut longer output, with a note on stderr (default 28)")
+    t.add_argument("--font", default='Menlo, "DejaVu Sans Mono", Consolas, monospace', help="CSS font-family (default Menlo first)")
     t.add_argument("--line-height", default="1.3", help="1.2 keeps box-drawing tables joined (default 1.3)")
     t.add_argument("--no-stderr", action="store_true", help="drop stderr (warnings, progress bars)")
     t.set_defaults(fn=cmd_term)

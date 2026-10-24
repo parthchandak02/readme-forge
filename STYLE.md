@@ -65,6 +65,8 @@ install, a 10-line usage example and the API. Drop sections; never pad them.
   private messages. Use demo data, or crop.
 - Demo data is fine and usually necessary: fake API, made-up files, public-domain sample photos.
   Say so in the caption.
+- Make captures repeatable: `rf.py shoot --seed N` for anything random, `--mock` or `--init-js` for
+  demo data, `--stable MS` for pages that animate in. Run `python3 rf.py shoot -h` for every option.
 - No image is better than a bad image. If the thing has no honest visual, use a text-only hero.
 
 ## Private repos

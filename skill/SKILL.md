@@ -29,6 +29,11 @@ first, every time; it is the spec. `layouts/` has four skeletons (app, cli, visu
      `--type "sel=text"`, `--drag x1,y1,x2,y2` or `--wheel N` (all run after `--wait`; `--settle` waits
      after them). `--clip x,y,w,h` crops. `--mock "glob=file.json"` answers an API with demo data;
      `--seed N` freezes Math.random so a generative piece captures the same frame every run.
+     `--init-js "localStorage.x='demo'"` (or a `.js` file) runs before the app's own scripts, so it can
+     seed demo state without a reload. `--js` may use `await`; a returned promise is awaited.
+   - Timing: `--wait` is a plain timer (animations do run in headless). `--stable 6000` then waits until
+     two frames 250 ms apart match, for charts that animate in. Pages that never finish loading (live
+     streams, long polls): `--load domcontentloaded`. `--dark` also sets `html.dark` and `data-theme="dark"`.
    - Demo data is fine and often necessary: a scratch copy of the app, a tiny fake API server, or a
      made-up input file, all with obviously fictional content. Say "demo data" in the caption.
    - Hardware projects: show what the device displays (a rendered preview), the web UI, or a
@@ -51,6 +56,8 @@ first, every time; it is the spec. `layouts/` has four skeletons (app, cli, visu
 - Some repos' `.gitignore` ignores everything by default; check `git status` after `git add` and
   use `git add -f README.md docs/assets/readme` if your files weren't staged.
 - Rich/box-drawing tables: `rf.py term ... --line-height 1.2`. Drop warnings with `--no-stderr`.
+  `term` prints a note on stderr when it cuts output (`--max-lines`, default 28) or when glyphs fall
+  back from the first `--font` (default Menlo); the image shows "… N more lines".
 - Viewing the rendered page on GitHub is optional; `rf.py check` is the gate. Private repos can't be
   viewed by `shoot` anyway.
 - The owner's git-secrets hook flags `.env`, `.venv`, `environ`, `<your-key>` placeholders and long
