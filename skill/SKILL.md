@@ -47,7 +47,7 @@ first, every time; it is the spec. `layouts/` has four skeletons (app, cli, visu
 7. **Commit only your files**: `git add README.md docs/assets/readme` (never `git add -A`; the repo
    may have the owner's unrelated uncommitted work). Message: `Rewrite README as a front page`.
    If a pre-commit secret scanner blocks the commit, read every flagged line; if all are false
-   positives (placeholders, the word `.env`, image bytes), commit that one time with `--no-verify`.
+   positives, add a narrow regex for them to the repo's `.gitallowed` and commit that too.
    If anything looks like a real secret, stop and report it. Then `git push`.
 
 ## Practicalities
@@ -60,9 +60,9 @@ first, every time; it is the spec. `layouts/` has four skeletons (app, cli, visu
   back from the first `--font` (default Menlo); the image shows "… N more lines".
 - Viewing the rendered page on GitHub is optional; `rf.py check` is the gate. Private repos can't be
   viewed by `shoot` anyway.
-- The owner's git-secrets hook flags `.env`, `.venv`, `environ`, `<your-key>` placeholders and long
-  upper-case strings. Read the flagged lines; if every one is that kind of false positive, commit
-  with `--no-verify`.
+- The owner's git-secrets hook only flags real token shapes (`ghp_`, `sk-`, `AKIA`, `AIza`, `xox*-`,
+  `GOCSPX-`, private-key headers). A hit is almost always real; if it is a documented fake, allow it
+  with a narrow regex in `.gitallowed`. Don't use `--no-verify`.
 
 ## Don'ts
 
